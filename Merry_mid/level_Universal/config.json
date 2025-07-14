@@ -1,0 +1,162 @@
+{
+    "level_1": {
+        "background": "Level_1_Back.png",
+        "music": "Stage1.wav",
+        "choose_frame": "choose_1.png",
+        "countdown_time": 60,
+        "motion_switch_interval": 6.0,
+        "lamp_duration": 0.75,
+        "sound_interval": 0.75,
+        "action_window": 0.4,
+        "motion_combinations": [
+            ["open", "head", "open", "head"],
+            ["open", "head", "open", "head"]
+        ],
+        "actions": {
+            "open": {
+                "sound": "5_Cajon_Hit.wav",
+                "image": "05.png",
+                "word_image": "word5.png",
+                "positions": [0, 2]
+            },
+            "head": {
+                "sound": "4_Cajon_Side.wav",
+                "image": "04.png",
+                "word_image": "word4.png",
+                "positions": [1, 3]
+            }
+        },
+        "button_positions": {
+            "btn1": {"x": 634, "y": 380, "w": 50, "h": 50},
+            "btn2": {"x": 847, "y": 380, "w": 50, "h": 55},
+            "btn3": {"x": 1070, "y": 380, "w": 50, "h": 50},
+            "btn4": {"x": 1295, "y": 380, "w": 35, "h": 50}
+        }
+    },
+    "level_2": {
+        "background": "Level_2_Back.png",
+        "music": "Stage2.wav",
+        "choose_frame": "choose_2.png",
+        "countdown_time": 60,
+        "motion_switch_interval": 6.0,
+        "lamp_duration": 0.75,
+        "sound_interval": 0.75,
+        "action_window": 0.4,
+        "motion_combinations": [
+            ["open", "head", "right", "left"],
+            ["open", "head", "right", "left"]
+        ],
+        "actions": {
+            "open": {
+                "sound": "5_Cajon_Hit.wav",
+                "image": "05.png",
+                "word_image": "word5.png",
+                "positions": [0]
+            },
+            "head": {
+                "sound": "4_Cajon_Side.wav",
+                "image": "04.png",
+                "word_image": "word4.png",
+                "positions": [1]
+            },
+            "right": {
+                "sound": "3_HandclapR_1.wav",
+                "image": "02.png",
+                "word_image": "word2.png",
+                "positions": [2]
+            },
+            "left": {
+                "sound": "2_HandclapL_1.wav",
+                "image": "03.png",
+                "word_image": "word3.png",
+                "positions": [3]
+            }
+        },
+        "button_positions": {
+            "btn1": {"x": 634, "y": 380, "w": 50, "h": 50},
+            "btn2": {"x": 847, "y": 380, "w": 50, "h": 55},
+            "btn3": {"x": 1070, "y": 380, "w": 50, "h": 50},
+            "btn4": {"x": 1295, "y": 380, "w": 35, "h": 50}
+        }
+    },
+    "level_3": {
+        "background": "Level_3_Back.png",
+        "music": "Stage3.wav",
+        "choose_frame": "choose_3.png",
+        "countdown_time": 60,
+        "motion_switch_interval": 6.0,
+        "lamp_duration": 0.75,
+        "sound_interval": 0.75,
+        "action_window": 0.4,
+        "motion_combinations": [
+            ["open", "head_1", "empty_1", "left"],
+            ["open", "empty_2", "head_2", "right"]
+        ],
+        "actions": {
+            "open": {
+                "sound": "5_Cajon_Hit.wav",
+                "image": "05.png",
+                "word_image": "word5.png",
+                "positions": [0]
+            },
+            "head_1": {
+                "sound": "4_Cajon_Side.wav",
+                "image": "04.png",
+                "word_image": "word4.png",
+                "positions": [1]
+            },
+            "head_2": {
+                "sound": "4_Cajon_Side.wav",
+                "image": "04.png",
+                "word_image": "word4.png",
+                "positions": [2]
+            },
+            "empty_1": {
+                "sound": null,
+                "image": "empty.png",
+                "word_image": null,
+                "positions": [2]
+            },
+            "empty_2": {
+                "sound": null,
+                "image": "empty.png",
+                "word_image": null,
+                "positions": [1]
+            },
+            "left": {
+                "sound": "2_HandclapL_1.wav",
+                "image": "03.png",
+                "word_image": "word3.png",
+                "positions": [3]
+            },
+            "right": {
+                "sound": "3_HandclapR_1.wav",
+                "image": "02.png",
+                "word_image": "word2.png",
+                "positions": [3]
+            }
+        },
+        "image_positions": {
+            "open": {"x": 542, "y": 445, "w": 234, "h": 334},
+            "head_1": {"x": 764, "y": 445, "w": 236, "h": 334},
+            "head_2": {"x": 978, "y": 445, "w": 236, "h": 334},
+            "empty_1": {"x": 978, "y": 445, "w": 236, "h": 334},
+            "empty_2": {"x": 764, "y": 445, "w": 236, "h": 334},
+            "left": {"x": 1200, "y": 445, "w": 236, "h": 334},
+            "right": {"x": 1200, "y": 445, "w": 236, "h": 334}
+        },
+        "word_positions": {
+            "open": {"x": 610, "y": 800, "w": 100, "h": 22},
+            "head_1": {"x": 830, "y": 800, "w": 100, "h": 22},
+            "head_2": {"x": 1063, "y": 800, "w": 75, "h": 22},
+            "left": {"x": 1280, "y": 800, "w": 75, "h": 22},
+            "right": {"x": 1280, "y": 800, "w": 75, "h": 22}
+        },
+        "button_positions": {
+            "btn1": {"x": 634, "y": 380, "w": 50, "h": 50},
+            "btn2": {"x": 847, "y": 380, "w": 50, "h": 55},
+            "btn3": {"x": 1070, "y": 380, "w": 50, "h": 50},
+            "btn4": {"x": 1295, "y": 380, "w": 35, "h": 50}
+        }
+    }
+} 
