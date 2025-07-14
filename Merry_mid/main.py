@@ -465,7 +465,7 @@ def run_level(screen, cap, level_name, selected_sound_pack):
                     draw.text(((cropped_frame.shape[1] - text_width) // 2, (cropped_frame.shape[0] - text_height) // 3), text, fill=(255, 255, 255), font=countdown_font)
                     cropped_frame = np.array(pil_img)
 
-            if countdown_completed and time.time() - post_countdown_start_time == 1.5:
+            if countdown_completed and time.time() - post_countdown_start_time >= 1.5:
                 detected_actions = detect_pose_action(landmarks)
                 open_detected |= detected_actions["open"]
                 left_detected  |= detected_actions["left"]
@@ -477,7 +477,7 @@ def run_level(screen, cap, level_name, selected_sound_pack):
             finish_triggered = True
             show_finish_popup = True
 
-        if countdown_completed and time.time() - post_countdown_start_time == 1.5 and not show_finish_popup:
+        if countdown_completed and time.time() - post_countdown_start_time >= 1.5 and not show_finish_popup:
             if current_time - last_switch_time > highlight_interval:
                 highlight_index = next_highlight_index
                 next_highlight_index = (highlight_index + 1) % 4

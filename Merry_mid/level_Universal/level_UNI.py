@@ -390,7 +390,7 @@ def run_level(screen, cap, level_name):
 
             # ✅ 倒數完成後才執行動作辨識
              # ✅ 倒數完成 + 音樂播放滿 1.5 秒後，才開始動作辨識。 結束彈窗出現後停止主迴圈
-            if countdown_completed and time.time() - post_countdown_start_time == 1.5 and not show_finish_popup:
+            if countdown_completed and time.time() - post_countdown_start_time >= 1.5 and not show_finish_popup:
                 detected_actions = detect_pose_action(landmarks)
                 open_detected |= detected_actions["open"]
                 left_detected  |= detected_actions["left"]
@@ -410,7 +410,7 @@ def run_level(screen, cap, level_name):
 
         # ✅ 主流程邏輯僅在倒數結束後執行
          # ✅ 倒數完成 + 音樂播放滿 1.5 秒後，才開始主迴圈。 結束彈窗出現後停止主迴圈
-        if countdown_completed and time.time() - post_countdown_start_time == 1.5 and not show_finish_popup:
+        if countdown_completed and time.time() - post_countdown_start_time >= 1.5 and not show_finish_popup:
 
             # 每 highlight_interval 秒切換一次 highlight_index（循環切換四個位置）
             if current_time - last_switch_time > highlight_interval:
@@ -466,46 +466,46 @@ def run_level(screen, cap, level_name):
                             canvas = overlay_image(canvas, img_open, img_open2_x, img_open2_y, img_open2_w, img_open2_h)
                             canvas = overlay_image(canvas, word_open, img_word5_2_x, img_word5_2_y, img_word5_2_w, img_word5_2_h)
 
-            # # 检查是否可以播放新的声音
-            # # if not sound_triggered_in_current_window:  # 添加条件：当前窗口未触发过声音
-            #     current_action = current_combination[highlight_index]
-            #     # if current_action in action_resources:
-            #     resource = action_resources[current_action]
+            # 检查是否可以播放新的声音
+            # if not sound_triggered_in_current_window:  # 添加条件：当前窗口未触发过声音
+                current_action = current_combination[highlight_index]
+                # if current_action in action_resources:
+                resource = action_resources[current_action]
                     
-            #         # 检测动作并播放对应音效
-            #     action_detected = False
-            #     if current_action == "open" and open_detected and not prev_open:
-            #             resource["sound"].play()
-            #             action_detected = True
-            #             prev_open = True
-            #             print("level Work")
-            #     if (current_action == "head" or current_action.startswith("head")) and head_detected and not prev_head:
-            #             resource["sound"].play()
-            #             action_detected = True
-            #             prev_head = True
-            #             print("level Work")
-            #     if current_action == "left" and left_detected and not prev_left:
-            #             resource["sound"].play()
-            #             action_detected = True
-            #             prev_left = True
-            #             print("level Work")
-            #     if current_action == "right" and right_detected and not prev_right:
-            #             resource["sound"].play()
-            #             action_detected = True
-            #             prev_right = True
-            #             print("level Work")
+                    # 检测动作并播放对应音效
+                action_detected = False
+                if current_action == "open" and open_detected and not prev_open:
+                        resource["sound"].play()
+                        action_detected = True
+                        prev_open = True
+                        print("level Work")
+                if (current_action == "head" or current_action.startswith("head")) and head_detected and not prev_head:
+                        resource["sound"].play()
+                        action_detected = True
+                        prev_head = True
+                        print("level Work")
+                if current_action == "left" and left_detected and not prev_left:
+                        resource["sound"].play()
+                        action_detected = True
+                        prev_left = True
+                        print("level Work")
+                if current_action == "right" and right_detected and not prev_right:
+                        resource["sound"].play()
+                        action_detected = True
+                        prev_right = True
+                        print("level Work")
                     
-            #         # 如果检测到动作且在正确的时间窗口内
-            #     if action_detected:
-            #             # if (highlight_index in resource["positions"] or
-            #             #     (is_in_next_window and next_highlight_index in resource["positions"]) or
-            #             #     (is_in_previous_window and ((highlight_index - 1) % 4) in resource["positions"])):
-            #                 if resource["sound"]:
-            #                     # resource["sound"].play()
-            #                     last_sound_time = current_time
-            #                     score_total += 10
-            #                     combo_count += 1
-            #                     sound_triggered_in_current_window = True  # 标记当前窗口已触发声音
+                    # 如果检测到动作且在正确的时间窗口内
+                if action_detected:
+                        # if (highlight_index in resource["positions"] or
+                        #     (is_in_next_window and next_highlight_index in resource["positions"]) or
+                        #     (is_in_previous_window and ((highlight_index - 1) % 4) in resource["positions"])):
+                            if resource["sound"]:
+                                # resource["sound"].play()
+                                last_sound_time = current_time
+                                score_total += 10
+                                combo_count += 1
+                                sound_triggered_in_current_window = True  # 标记当前窗口已触发声音
 
                 # 重置未检测到的动作状态
                 if not open_detected:
