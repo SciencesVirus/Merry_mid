@@ -7,7 +7,7 @@
         "motion_switch_interval": 6.0,
         "lamp_duration": 0.75,
         "sound_interval": 0.75,
-        "action_window": 0.4,
+        "action_window": 0.6,
         "motion_combinations": [
             ["open", "head", "open", "head"],
             ["open", "head", "open", "head"]
@@ -41,7 +41,7 @@
         "motion_switch_interval": 6.0,
         "lamp_duration": 0.75,
         "sound_interval": 0.75,
-        "action_window": 0.4,
+        "action_window": 0.6,
         "motion_combinations": [
             ["open", "head", "right", "left"],
             ["open", "head", "right", "left"]
