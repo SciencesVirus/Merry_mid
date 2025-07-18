@@ -26,18 +26,18 @@ def desaturate_image(img):
     """將圖片去飽和度以表示禁用狀態"""
     if img is None:
         return None
-    if len(img.shape) == 2:
+    # 檢查圖片是否有 alpha 通道
+    if len(img.shape) == 2: # 灰度圖
         return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-    
-    bgr = img[:, :, :3]
-    alpha = img[:, :, 3] if img.shape[2] == 4 else None
-    
-    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-    
-    if alpha is not None:
-        return cv2.merge([gray, gray, gray, alpha])
-    else:
+    elif img.shape[2] == 3: # BGR 圖
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    elif img.shape[2] == 4: # BGRA 圖
+        bgr = img[:, :, :3]
+        alpha = img[:, :, 3]
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        return cv2.merge([gray, gray, gray, alpha])
+    return img # 返回原圖如果格式不符
 
 def load_config(level_name):
     """讀取指定關卡的配置文件"""
@@ -81,15 +81,39 @@ def overlay_image(background, overlay, x, y, width, height):
     overlay_resized = cv2.resize(overlay, (width, height))
     h, w = overlay_resized.shape[:2]
     bg_h, bg_w = background.shape[:2]
-    if x + w > bg_w or y + h > bg_h or x < 0 or y < 0: return background
-    if len(overlay_resized.shape) > 2 and overlay_resized.shape[2] == 4:
-        alpha_s = overlay_resized[:, :, 3] / 255.0
-        alpha_l = 1.0 - alpha_s
-        for c in range(3):
-            background[y:y+h, x:x+w, c] = (alpha_s * overlay_resized[:, :, c] +
-                                          alpha_l * background[y:y+h, x:x+w, c])
-    else:
-        background[y:y+h, x:x+w] = overlay_resized
+    # 檢查疊加位置是否超出背景邊界
+    if x + w > bg_w or y + h > bg_h or x < 0 or y < 0: 
+        # 如果超出，只疊加可見部分
+        x1, y1 = max(0, x), max(0, y)
+        x2, y2 = min(bg_w, x + w), min(bg_h, y + h)
+        
+        overlay_x1 = x1 - x
+        overlay_y1 = y1 - y
+        overlay_x2 = overlay_x1 + (x2 - x1)
+        overlay_y2 = overlay_y1 + (y2 - y1)
+        
+        overlay_cropped = overlay_resized[overlay_y1:overlay_y2, overlay_x1:overlay_x2]
+        
+        if overlay_cropped.shape[0] == 0 or overlay_cropped.shape[1] == 0:
+            return background # 如果裁剪後為空，則不疊加
+
+        if len(overlay_cropped.shape) > 2 and overlay_cropped.shape[2] == 4:
+            alpha_s = overlay_cropped[:, :, 3] / 255.0
+            alpha_l = 1.0 - alpha_s
+            for c in range(3):
+                background[y1:y2, x1:x2, c] = (alpha_s * overlay_cropped[:, :, c] +
+                                               alpha_l * background[y1:y2, x1:x2, c])
+        else:
+            background[y1:y2, x1:x2] = overlay_cropped
+    else: # 完全在背景內
+        if len(overlay_resized.shape) > 2 and overlay_resized.shape[2] == 4:
+            alpha_s = overlay_resized[:, :, 3] / 255.0
+            alpha_l = 1.0 - alpha_s
+            for c in range(3):
+                background[y:y+h, x:x+w, c] = (alpha_s * overlay_resized[:, :, c] +
+                                               alpha_l * background[y:y+h, x:x+w, c])
+        else:
+            background[y:y+h, x:x+w] = overlay_resized
     return background
 
 # --- 校正畫面邏輯 ---
@@ -111,7 +135,7 @@ def run_correction_screen(screen, cap):
     pose = mp_pose.Pose()
 
     # 尺寸
-    cam_x, cam_y, cam_w, cam_h = 277, 245, 365, 560
+    cam_x, cam_y, cam_w, cam_h = 277, 278, 365, 560
     yes_x, yes_y, yes_w, yes_h = 350, 424, 205, 205
     btn_x, btn_y, btn_w, btn_h = 889, 814, 129, 46
 
@@ -135,126 +159,154 @@ def run_correction_screen(screen, cap):
         return abs(l_ankle_x - r_ankle_x) < 0.12
 
     running = True
-    while running:
-        ret, frame = cap.read()
-        if not ret: break
+    try: # 添加 try-finally 確保資源釋放
+        while running:
+            ret, frame = cap.read()
+            if not ret: break
 
-        frame = cv2.flip(frame, 1) # 鏡像翻轉
-        bg = cv2.resize(bg_image, (SCREEN_WIDTH, SCREEN_HEIGHT))
-        frame_resized = cv2.resize(frame, (cam_w, cam_h))
-        results = pose.process(cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB))
-        
-        # 將攝影機畫面疊加到背景上
-        bg[cam_y:cam_y+cam_h, cam_x:cam_x+cam_w] = frame_resized[:, :, :3]
+            frame = cv2.flip(frame, 1) # 鏡像翻轉
+            bg = cv2.resize(bg_image, (SCREEN_WIDTH, SCREEN_HEIGHT))
+            frame_resized = cv2.resize(frame, (cam_w, cam_h))
+            results = pose.process(cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB))
+            
+            # 將攝影機畫面疊加到背景上
+            bg[cam_y:cam_y+cam_h, cam_x:cam_x+cam_w] = frame_resized[:, :, :3]
 
-        show_text = True
-        if results.pose_landmarks:
-            landmarks = results.pose_landmarks.landmark
-            if is_full_body_visible(landmarks) and are_legs_together(landmarks):
-                if hold_start_time is None:
-                    hold_start_time = time.time() # 開始計時
-                elif time.time() - hold_start_time >= 3.0 and not success_once: # 持續 3 秒
-                    success_once = True
-                    ding_sound.play()
-                show_text = False # 滿足條件時不顯示提示文字
-            else:
-                hold_start_time = None # 不滿足條件則重置計時
-        
-        # 顯示提示文字
-        if show_text:
-            pil_img = Image.fromarray(bg)
-            draw = ImageDraw.Draw(pil_img)
-            try:
-                font = ImageFont.truetype(font_path, 28)
-            except:
-                font = ImageFont.load_default()
-            lines = ["請保持全身在拍攝畫面以內", "並將雙腿盡量併攏"]
-            line_heights = [draw.textbbox((0,0), l, font=font)[3] for l in lines]
-            total_text_height = sum(line_heights) + 10 * (len(lines) - 1)
-            start_y = cam_y + (cam_h - total_text_height) // 2
-            current_y = start_y
-            for i, line in enumerate(lines):
-                line_width = draw.textbbox((0,0), line, font=font)[2]
-                draw.text((cam_x + (cam_w - line_width) // 2, current_y), line, font=font, fill=(0, 100, 255))
-                current_y += line_heights[i] + 10
-            bg = np.array(pil_img)
-
-        # 顯示倒數計時 (校正階段的倒數)
-        if hold_start_time and not success_once:
-            elapsed = time.time() - hold_start_time
-            seconds_left = 4 - int(elapsed + 1) # 顯示 3, 2, 1
-            if 1 <= seconds_left <= 3:
+            show_text = True
+            if results.pose_landmarks:
+                landmarks = results.pose_landmarks.landmark
+                if is_full_body_visible(landmarks) and are_legs_together(landmarks):
+                    if hold_start_time is None:
+                        hold_start_time = time.time() # 開始計時
+                    elif time.time() - hold_start_time >= 3.0 and not success_once: # 持續 3 秒
+                        success_once = True
+                        ding_sound.play()
+                    show_text = False # 滿足條件時不顯示提示文字
+                else:
+                    hold_start_time = None # 不滿足條件則重置計時
+            
+            # 顯示提示文字
+            if show_text:
                 pil_img = Image.fromarray(bg)
                 draw = ImageDraw.Draw(pil_img)
                 try:
-                    countdown_font = ImageFont.truetype(font_path, 120)
+                    font = ImageFont.truetype(font_path, 28)
                 except:
-                    countdown_font = ImageFont.load_default()
-                text = str(seconds_left)
-                text_bbox = draw.textbbox((0, 0), text, font=countdown_font)
-                text_width = text_bbox[2] - text_bbox[0]
-                text_height = text_bbox[3] - text_bbox[1]
-                draw.text((cam_x + (cam_w - text_width) // 2, cam_y + (cam_h - text_height) // 3), text, fill=(255, 255, 255), font=countdown_font)
+                    font = ImageFont.load_default()
+                lines = ["請保持全身在拍攝畫面以內", "並將雙腿盡量併攏"]
+                line_heights = [draw.textbbox((0,0), l, font=font)[3] for l in lines]
+                total_text_height = sum(line_heights) + 10 * (len(lines) - 1)
+                start_y = cam_y + (cam_h - total_text_height) // 2
+                current_y = start_y
+                for i, line in enumerate(lines):
+                    line_width = draw.textbbox((0,0), line, font=font)[2]
+                    draw.text((cam_x + (cam_w - line_width) // 2, current_y), line, font=font, fill=(0, 100, 255))
+                    current_y += line_heights[i] + 10
                 bg = np.array(pil_img)
 
-        # 顯示成功或未成功的按鈕
-        if success_once:
-            bg = overlay_image(bg, yes_img, yes_x, yes_y, yes_w, yes_h)
-            bg = overlay_image(bg, next_btn, btn_x, btn_y, btn_w, btn_h)
-        else:
-            bg = overlay_image(bg, no_btn, btn_x, btn_y, btn_w, btn_h)
+            # 顯示倒數計時 (校正階段的倒數)
+            if hold_start_time and not success_once:
+                elapsed = time.time() - hold_start_time
+                seconds_left = 4 - int(elapsed + 1) # 顯示 3, 2, 1
+                if 1 <= seconds_left <= 3:
+                    pil_img = Image.fromarray(bg)
+                    draw = ImageDraw.Draw(pil_img)
+                    try:
+                        countdown_font = ImageFont.truetype(font_path, 120)
+                    except:
+                        countdown_font = ImageFont.load_default()
+                    text = str(seconds_left)
+                    text_bbox = draw.textbbox((0, 0), text, font=countdown_font)
+                    text_width = text_bbox[2] - text_bbox[0]
+                    text_height = text_bbox[3] - text_bbox[1]
+                    draw.text(((cam_w - text_width) // 2, (cam_h - text_height) // 3), text, fill=(255, 255, 255), font=countdown_font)
+                    bg = np.array(pil_img)
 
-        canvas_rgb = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
-        pygame_surface = pygame.image.frombuffer(canvas_rgb.tobytes(), (SCREEN_WIDTH, SCREEN_HEIGHT), "RGB")
-        screen.blit(pygame_surface, (0, 0))
-        pygame.display.flip()
-        clock.tick(30)
+            # 顯示成功或未成功的按鈕
+            if success_once:
+                bg = overlay_image(bg, yes_img, yes_x, yes_y, yes_w, yes_h)
+                bg = overlay_image(bg, next_btn, btn_x, btn_y, btn_w, btn_h)
+            else:
+                bg = overlay_image(bg, no_btn, btn_x, btn_y, btn_w, btn_h)
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return "quit"
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                if success_once:
-                    mx, my = pygame.mouse.get_pos()
-                    if btn_x <= mx <= btn_x + btn_w and btn_y <= my <= btn_y + btn_h:
-                        return "start_game" # 進入遊戲關卡
+            canvas_rgb = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
+            pygame_surface = pygame.image.frombuffer(canvas_rgb.tobytes(), (SCREEN_WIDTH, SCREEN_HEIGHT), "RGB")
+            screen.blit(pygame_surface, (0, 0))
+            pygame.display.flip()
+            clock.tick(30)
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False # 設置為 False 退出循環
+                    return "quit"
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if success_once:
+                        mx, my = pygame.mouse.get_pos()
+                        if btn_x <= mx <= btn_x + btn_w and btn_y <= my <= btn_y + btn_h:
+                            running = False # 設置為 False 退出循環
+                            return "start_game" # 進入遊戲關卡
+    finally:
+        if 'pose' in locals() and pose: # 確保 pose 物件存在才呼叫 close
+            pose.close() # 確保釋放 MediaPipe 資源
 
 # --- 遊戲關卡邏輯 ---
-def run_level(screen, cap, level_name, selected_sound_pack):
+def run_level(screen, cap):
     """執行單一關卡的遊戲主迴圈"""
-    # 時間戳記 (重要修改點)
+    
+    # 宣告使用全域變數
+    global selected_sound_pack 
+    global current_level_index 
+
+    # 載入當前關卡配置
+    config = load_config(LEVEL_ORDER[current_level_index])
+    level_name = LEVEL_ORDER[current_level_index] # 重新取得 level_name
+
+    # 初始化時間戳記和遊戲狀態變數
     music_start_time = None # 記錄音樂開始播放的系統時間，用於 UI 倒數計時顯示
-    last_highlight_switch_music_ms = -300 # 上一次動作提示切換時，音樂的毫秒進度
+    last_sound_time = time.time() # 控制所有動作音效的冷卻時間
+    
+    last_highlight_switch_music_ms = 0 # 上一次動作提示切換時，音樂的毫秒進度
     last_motion_switch_music_ms = 0   # 上一次動作組合切換時，音樂的毫秒進度
 
-    # 新增或修改這兩行，確保它們在任何邏輯判斷之前就被初始化
+    # 初始化高亮索引
     highlight_index = 0  # 初始設定為第一個高亮位置
     next_highlight_index = 1 # 初始設定為下一個高亮位置 
-    current_level_index = LEVEL_ORDER.index(level_name)
-    config = load_config(level_name)
     
+    # 載入預先處理好的節拍時間 (秒)
+    full_beat_times_s = config.get("beat_times", [])
+    beat_times_s = [time_val for i, time_val in enumerate(full_beat_times_s) if i % 2 != 0]
+ 
+    beat_index = 0 # 當前目標節拍的索引
+
+    # 初始化下一個高亮音樂時間點
+    # 如果有節拍數據，則將第一個節拍作為初始高亮時間點
+    # 否則，使用一個預設值，例如 0
+    next_highlight_music_ms = 0
+    if beat_times_s:
+        next_highlight_music_ms = beat_times_s[beat_index] * 1000
+
     # --- 建立音效對照表 ---
     sound_packs = {
         "percussion": {
-            "1_Cajon_Tremolo.wav": "Sound effects/Percussion/1_Cajon_Tremolo.wav",
-            "2_HandclapL_1.wav":   "Sound effects/Percussion/2_HandclapL_1.wav",
-            "3_HandclapR_1.wav":   "Sound effects/Percussion/3_HandclapR_1.wav",
-            "4_Cajon_Side.wav":    "Sound effects/Percussion/4_Cajon_Side.wav",
-            "5_Cajon_Hit.wav":     "Sound effects/Percussion/5_Cajon_Hit.wav",
+            "1_Cajon_Tremolo.wav": r"Sound effects/Percussion/1_Cajon_Tremolo.wav",
+            "2_HandclapL_1.wav":   r"Sound effects/Percussion/2_HandclapL_1.wav",
+            "3_HandclapR_1.wav":   r"Sound effects/Percussion/3_HandclapR_1.wav",
+            "4_Cajon_Side.wav":    r"Sound effects/Percussion/4_Cajon_Side.wav",
+            "5_Cajon_Hit.wav":     r"Sound effects/Percussion/5_Cajon_Hit.wav",
         },
         "daily": {
-            "1_Cajon_Tremolo.wav": "Sound effects/Quotidien/1_ScrewsInGlass.wav",
-            "2_HandclapL_1.wav":   "Sound effects/Quotidien/2_WaterBottleL.wav",
-            "3_HandclapR_1.wav":   "Sound effects/Quotidien/3_WaterBottleR.wav",
-            "4_Cajon_Side.wav":    "Sound effects/Quotidien/4_PropaneTank.wav",
-            "5_Cajon_Hit.wav":     "Sound effects/Quotidien/5_WaterBasin.mp3",
+            "1_Cajon_Tremolo.wav": r"Sound effects/Quotidien/1_ScrewsInGlass.wav",
+            "2_HandclapL_1.wav":   r"Sound effects/Quotidien/2_WaterBottleL.wav",
+            "3_HandclapR_1.wav":   r"Sound effects/Quotidien/3_WaterBottleR.wav",
+            "4_Cajon_Side.wav":    r"Sound effects/Quotidien/4_PropaneTank.wav",
+            "5_Cajon_Hit.wav":     r"Sound effects/Quotidien/5_WaterBasin.mp3",
         },
         "animal": {
-            "1_Cajon_Tremolo.wav": "Sound effects/Animal/1_BirdsE.wav",
-            "2_HandclapL_1.wav":   "Sound effects/Animal/2_BirdsB_L.wav",
-            "3_HandclapR_1.wav":   "Sound effects/Animal/3_BirdsB_R.wav",
-            "4_Cajon_Side.wav":    "Sound effects/Animal/4_BirdsD.wav",
-            "5_Cajon_Hit.wav":     "Sound effects/Animal/5_BirdsA.wav",
+            "1_Cajon_Tremolo.wav": r"Sound effects/Animal/1_BirdsE.wav",
+            "2_HandclapL_1.wav":   r"Sound effects/Animal/2_BirdsB_L.wav",
+            "3_HandclapR_1.wav":   r"Sound effects/Animal/3_BirdsB_R.wav",
+            "4_Cajon_Side.wav":    r"Sound effects/Animal/4_BirdsD.wav",
+            "5_Cajon_Hit.wav":     r"Sound effects/Animal/5_BirdsA.wav",
         }
     }
     current_sound_pack_files = sound_packs.get(selected_sound_pack, sound_packs["percussion"])
@@ -283,17 +335,27 @@ def run_level(screen, cap, level_name, selected_sound_pack):
     # 載入所有動作所需的音效和圖片
     action_resources = {}
     for action_name, action_config in config["actions"].items():
+        print('action_config', action_config)
         base_sound_file = action_config.get("sound")
         image_file = action_config.get("image")
         word_image_file = action_config.get("word_image")
-        
+        print('base_sound_file', base_sound_file,)
         final_sound_path = None
         if base_sound_file:
             # 從對照表中查找對應的音效路徑
             final_sound_path = current_sound_pack_files.get(base_sound_file)
-            if not final_sound_path or not os.path.exists(final_sound_path):
-                print(f"警告: 在音效包 '{selected_sound_pack}' 中找不到 '{base_sound_file}' 的對應音效，路徑 '{final_sound_path}' 不存在。")
-                final_sound_path = None
+            print('final_sound_path', final_sound_path)
+            if final_sound_path: # 確保有找到對應的檔案名
+                # full_path = os.path.join(ASSETS_PATH, final_sound_path) # 組合完整路徑
+                full_path = final_sound_path
+                if not os.path.exists(full_path):
+                    print(f"警告: 音效檔案不存在: {full_path}")
+                    final_sound_path = None # 如果檔案不存在，則設為 None
+                else:
+                    final_sound_path = full_path # 使用完整路徑
+            else:
+                print(f"警告: 在音效包 '{selected_sound_pack}' 中找不到 '{base_sound_file}' 的對應音效。")
+
 
         action_resources[action_name] = {
             "sound": pygame.mixer.Sound(final_sound_path) if final_sound_path else None,
@@ -319,11 +381,12 @@ def run_level(screen, cap, level_name, selected_sound_pack):
     btn3_img = cv2.imread(os.path.join(ASSETS_PATH, "light3.png"), cv2.IMREAD_UNCHANGED)
     btn4_img = cv2.imread(os.path.join(ASSETS_PATH, "light4.png"), cv2.IMREAD_UNCHANGED)
     
-    end_btn = cv2.imread(os.path.join(ASSETS_PATH, "end.png"), cv2.IMREAD_UNCHANGED)
-    next_btn = cv2.imread(os.path.join(ASSETS_PATH, "next.png"), cv2.IMREAD_UNCHANGED)
+    # 優化：只載入一次並處理去飽和度
+    end_btn_original = cv2.imread(os.path.join(ASSETS_PATH, "end.png"), cv2.IMREAD_UNCHANGED)
+    next_btn_original = cv2.imread(os.path.join(ASSETS_PATH, "next.png"), cv2.IMREAD_UNCHANGED)
     next2_btn = cv2.imread(os.path.join(ASSETS_PATH, "next2.png"), cv2.IMREAD_UNCHANGED) # 結束彈窗上的「下一關」
-    end_btn_disabled = desaturate_image(end_btn.copy())
-    next_btn_disabled = desaturate_image(next_btn.copy())
+    end_btn_disabled = desaturate_image(end_btn_original.copy())
+    next_btn_disabled = desaturate_image(next_btn_original.copy())
     
     # 各類圖片和按鈕的座標及尺寸 (部分用於 level_1, level_2 的通用動作圖片)
     img_right_x, img_right_y, img_right_w, img_right_h = 978, 445, 236, 334 
@@ -361,9 +424,6 @@ def run_level(screen, cap, level_name, selected_sound_pack):
     # 燈光透明度 (預設較暗)
     lamp1_alpha, lamp2_alpha, lamp3_alpha, lamp4_alpha = 0.1, 0.1, 0.1, 0.1
     
-    # 每個動作提示窗口是否已經觸發過音效
-    sound_triggered_in_current_window = False 
-    
     # 遊戲開始前倒數計時狀態
     countdown_started, countdown_completed = False, False
     hold_start_time, post_countdown_start_time = None, None
@@ -374,21 +434,16 @@ def run_level(screen, cap, level_name, selected_sound_pack):
     # 遊戲分數和連擊
     score_total, combo_count = 0, 0
     
-    # 時間戳記 (重要修改點)
-    music_start_time = None # 記錄音樂開始播放的系統時間，用於 UI 倒數計時顯示
-    # last_sound_time = time.time() # 這是防止音效短時間內重複播放的計時，可以保持用系統時間
-    
-    # 新增：基於音樂播放進度的時間戳記
-    last_highlight_switch_music_ms = 0 # 上一次動作提示切換時，音樂的毫秒進度
-    last_motion_switch_music_ms = 0   # 上一次動作組合切換時，音樂的毫秒進度
-
     # 關卡配置的時間參數
     countdown_time = config["countdown_time"] # 遊戲總時長
     motion_switch_interval = config["motion_switch_interval"] # 動作組合切換間隔 (秒)
     action_window = config["action_window"] # 動作判定寬容時間 (秒)
-    highlight_interval = 0.75 if level_name == "level_3" else 1.5 # 動作提示高亮間隔 (秒)
+    # highlight_interval = 0.75 if level_name == "level_3" else 1.5 # 動作提示高亮間隔 (秒) - 現在由節拍控制
     motion_combinations = config["motion_combinations"] # 動作組合列表
     current_motion_index = 0 # 當前動作組合在列表中的索引
+
+    # 新增一個音效冷卻時間，避免連續播放過快 (秒)
+    sound_cooldown = 0.2 
 
     # 疊圖函式，帶有透明度
     def overlay_image_with_alpha(background, overlay, x, y, w, h, alpha):
@@ -470,317 +525,380 @@ def run_level(screen, cap, level_name, selected_sound_pack):
         
         return actions
 
+    # 初始化下一個高亮音樂時間點 (毫秒)
+    # 這是基於 Librosa 節拍的時間點，而不是固定的 interval
+    next_highlight_music_ms = 0
+    if beat_times_s:
+        next_highlight_music_ms = beat_times_s[beat_index] * 1000
+    
+    # 節拍偵測的容忍度 (毫秒)，允許在節拍點前後一點點時間觸發
+    beat_tolerance_ms = 400 
+
     running = True
-    while running:
-        ret, frame = cap.read()
-        if not ret: break
+    try: # 添加 try-finally 確保資源釋放
+        while running:
+            ret, frame = cap.read()
+            if not ret: break
 
-        canvas = bg_image_resized.copy() # 每個循環都重新複製背景圖
-        frame = cv2.flip(frame, 1) # 鏡像翻轉
+            canvas = bg_image_resized.copy() # 每個循環都重新複製背景圖
+            frame = cv2.flip(frame, 1) # 鏡像翻轉
 
-        # 裁剪並調整攝影機畫面以適應顯示區域
-        orig_h, orig_w = frame.shape[:2]
-        scale_factor = max(cam_w / orig_w, cam_h / orig_h)
-        resized_w = int(orig_w * scale_factor)
-        resized_h = int(orig_h * scale_factor)
-        resized_frame = cv2.resize(frame, (resized_w, resized_h))
-        x_start = (resized_w - cam_w) // 2
-        y_start = (resized_h - cam_h) // 2
-        cropped_frame = resized_frame[y_start:y_start + cam_h, x_start:x_start + cam_w]
-        
-        # MediaPipe 處理
-        result = pose.process(cv2.cvtColor(cropped_frame, cv2.COLOR_BGR2RGB))
-        
-        # 如果需要顯示骨架，取消註釋以下代碼
-        # if result.pose_landmarks:
-        #     mp_drawing.draw_landmarks(
-        #         cropped_frame, 
-        #         result.pose_landmarks, 
-        #         mp_pose.POSE_CONNECTIONS, 
-        #         landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style()
-        #     )
+            # 裁剪並調整攝影機畫面以適應顯示區域
+            orig_h, orig_w = frame.shape[:2]
+            scale_factor = max(cam_w / orig_w, cam_h / orig_h)
+            resized_w = int(orig_w * scale_factor)
+            resized_h = int(orig_h * scale_factor)
+            resized_frame = cv2.resize(frame, (resized_w, resized_h))
+            x_start = (resized_w - cam_w) // 2
+            y_start = (resized_h - cam_h) // 2
+            cropped_frame = resized_frame[y_start:y_start + cam_h, x_start:x_start + cam_w]
+            
+            # MediaPipe 處理
+            result = pose.process(cv2.cvtColor(cropped_frame, cv2.COLOR_BGR2RGB))
+            
+            # 如果需要顯示骨架，取消註釋以下代碼
+            # if result.pose_landmarks:
+            #     mp_drawing.draw_landmarks(
+            #         cropped_frame, 
+            #         result.pose_landmarks, 
+            #         mp_pose.POSE_CONNECTIONS, 
+            #         landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style()
+            #     )
 
-        # 動作偵測狀態
-        right_detected, left_detected, head_detected, open_detected = False, False, False, False
-        full_body_ready, full_body_ready_now = False, False # full_body_ready_now 用於當前幀狀態
+            # 動作偵測狀態
+            right_detected, left_detected, head_detected, open_detected = False, False, False, False
+            full_body_ready_now = False # full_body_ready_now 用於當前幀狀態
 
-        # 判斷全身是否準備好 (用於遊戲開始前的倒數和提示)
-        if result.pose_landmarks:
-            landmarks = result.pose_landmarks.landmark
-            full_body_ready_now = is_full_body_visible(landmarks) and are_legs_together(landmarks)
+            # 判斷全身是否準備好 (用於遊戲開始前的倒數和提示)
+            if result.pose_landmarks:
+                landmarks = result.pose_landmarks.landmark
+                full_body_ready_now = is_full_body_visible(landmarks) and are_legs_together(landmarks)
 
-            # 遊戲開始前倒數邏輯 (與校正畫面類似，但這裡針對遊戲開始)
-            if full_body_ready_now and not countdown_started and not countdown_completed:
-                if hold_start_time is None: hold_start_time = time.time()
-                if time.time() - hold_start_time >= 3: # 持續 3 秒後開始遊戲倒數
-                    countdown_started = True
-                    countdown_start_time = time.time()
-            else:
-                hold_start_time = None # 如果不滿足全身可見並雙腿併攏，則重置計時
-
-            if countdown_started and not countdown_completed:
-                seconds_left = 3 - int(time.time() - countdown_start_time) # 遊戲開始前 3, 2, 1 倒數
-                if seconds_left <= 0:
-                    countdown_completed = True
-                    post_countdown_start_time = time.time() # 記錄倒數結束的系統時間
-                    pygame.mixer.music.play() # **開始播放背景音樂**
-                    music_start_time = time.time() # 記錄音樂開始的系統時間 (用於UI顯示)
-                    last_highlight_switch_music_ms = 0 # 重置音樂時間基準
-                    last_motion_switch_music_ms = 0   # 重置音樂時間基準
+                # 遊戲開始前倒數邏輯 (與校正畫面類似，但這裡針對遊戲開始)
+                if full_body_ready_now and not countdown_started and not countdown_completed:
+                    if hold_start_time is None: hold_start_time = time.time()
+                    if time.time() - hold_start_time >= 3: # 持續 3 秒後開始遊戲倒數
+                        countdown_started = True
+                        countdown_start_time = time.time()
                 else:
-                    # 在攝影機畫面中顯示倒數數字
-                    pil_img = Image.fromarray(cropped_frame.copy())
-                    draw = ImageDraw.Draw(pil_img)
-                    try:
-                        countdown_font = ImageFont.truetype(font_path, 120)
-                    except:
-                        countdown_font = ImageFont.load_default()
-                    text = str(seconds_left)
-                    text_bbox = draw.textbbox((0, 0), text, font=countdown_font)
-                    text_width = text_bbox[2] - text_bbox[0]
-                    text_height = text_bbox[3] - text_bbox[1]
-                    draw.text(((cropped_frame.shape[1] - text_width) // 2, (cropped_frame.shape[0] - text_height) // 3), text, fill=(255, 255, 255), font=countdown_font)
-                    cropped_frame = np.array(pil_img)
-            
-            # 如果倒數已完成且遊戲正式開始，才偵測動作
-            if countdown_completed:
-                 # 延遲 1.5 秒後才開始偵測動作，給予音樂和畫面一些同步時間
-                 if time.time() - post_countdown_start_time >= 1.5:
-                    detected_actions = detect_pose_action(landmarks)
-                    open_detected |= detected_actions["open"]
-                    left_detected |= detected_actions["left"]
-                    right_detected |= detected_actions["right"]
-                    head_detected |= detected_actions["head"]
-        else: # 如果沒有偵測到任何骨架，則身體不準備就緒
-            full_body_ready_now = False
+                    hold_start_time = None # 如果不滿足全身可見並雙腿併攏，則重置計時
 
-        # 遊戲計時結束判斷
-        current_time = time.time() # 系統時間
-        if countdown_completed and not finish_triggered and not pygame.mixer.music.get_busy():
-            # 音樂停止播放且未觸發結束彈窗，則觸發遊戲結束
-            finish_triggered = True
-            show_finish_popup = True
+                if countdown_started and not countdown_completed:
+                    seconds_left = 3 - int(time.time() - countdown_start_time) # 遊戲開始前 3, 2, 1 倒數
+                    if seconds_left <= 0:
+                        countdown_completed = True
+                        post_countdown_start_time = time.time() # 記錄倒數結束的系統時間
+                        pygame.mixer.music.play() # **開始播放背景音樂**
+                        music_start_time = time.time() # 記錄音樂開始的系統時間 (用於UI顯示)
+                        # Librosa 相關的時間基準在音樂播放後才開始更新
+                        # 這裡不需要重置 last_highlight_switch_music_ms 和 last_motion_switch_music_ms
+                        # 因為它們會在後面的邏輯中根據節拍數據自動更新
+                    else:
+                        # 在攝影機畫面中顯示倒數數字
+                        pil_img = Image.fromarray(cropped_frame.copy())
+                        draw = ImageDraw.Draw(pil_img)
+                        try:
+                            countdown_font = ImageFont.truetype(font_path, 120)
+                        except:
+                            countdown_font = ImageFont.load_default()
+                        text = str(seconds_left)
+                        text_bbox = draw.textbbox((0, 0), text, font=countdown_font)
+                        text_width = text_bbox[2] - text_bbox[0]
+                        text_height = text_bbox[3] - text_bbox[1]
+                        draw.text(((cropped_frame.shape[1] - text_width) // 2, (cropped_frame.shape[0] - text_height) // 3), text, fill=(255, 255, 255), font=countdown_font)
+                        cropped_frame = np.array(pil_img)
+                
+                # 如果倒數已完成且遊戲正式開始，才偵測動作
+                if countdown_completed:
+                    # 延遲 1.5 秒後才開始偵測動作，給予音樂和畫面一些同步時間
+                    if time.time() - post_countdown_start_time >= 1.5:
+                        detected_actions = detect_pose_action(landmarks)
+                        open_detected = detected_actions["open"] # 直接賦值
+                        left_detected = detected_actions["left"]
+                        right_detected = detected_actions["right"]
+                        head_detected = detected_actions["head"]
+            else: # 如果沒有偵測到任何骨架，則身體不準備就緒
+                full_body_ready_now = False
 
-        # --- 核心：基於音樂播放進度來切換動作提示 ---
-        if countdown_completed and not show_finish_popup:
-            # 取得當前音樂播放的毫秒數，這是所有時間同步的基準！
-            current_music_ms = pygame.mixer.music.get_pos()
-            # 處理 get_pos() 可能回傳負值的情況 (例如音樂剛停止)
-            if current_music_ms < 0:
-                current_music_ms = 0
+            # 遊戲計時結束判斷
+            current_time = time.time() # 系統時間
+            if countdown_completed and not finish_triggered and not pygame.mixer.music.get_busy():
+                # 音樂停止播放且未觸發結束彈窗，則觸發遊戲結束
+                finish_triggered = True
+                show_finish_popup = True
 
-            # 判斷是否需要切換動作提示高亮
-            # 將秒數的 highlight_interval 轉換為毫秒進行比較
-            if current_music_ms - last_highlight_switch_music_ms >= highlight_interval * 1000:
-                highlight_index = next_highlight_index
-                next_highlight_index = (highlight_index + 1) % 4
-                last_highlight_switch_music_ms = current_music_ms # **更新為當前音樂時間**
-                sound_triggered_in_current_window = False # 重置音效觸發狀態，允許在新窗口中觸發
+            # --- 核心：基於音樂播放進度來切換動作提示 ---
+            if countdown_completed and not show_finish_popup:
+                # 取得當前音樂播放的毫秒數，這是所有時間同步的基準！
+                current_music_ms = pygame.mixer.music.get_pos()
+                # 處理 get_pos() 可能回傳負值的情況 (例如音樂剛停止)
+                if current_music_ms < 0:
+                    current_music_ms = 0
 
-            # 判斷是否需要切換動作組合 (如果 config 中有設定 motion_switch_interval)
-            if current_music_ms - last_motion_switch_music_ms >= motion_switch_interval * 1000:
-                current_motion_index = (current_motion_index + 1) % len(motion_combinations)
-                last_motion_switch_music_ms = current_music_ms # **更新為當前音樂時間**
-                # 可以選擇在這裡重置 highlight_index 和相關時間戳，讓新組合從第一個動作開始
-                # highlight_index = 0
-                # next_highlight_index = 1
-                # last_highlight_switch_music_ms = current_music_ms
+                # 判斷是否需要切換動作提示高亮 (基於 Librosa 節拍)
+                if beat_index < len(beat_times_s) and \
+                   current_music_ms >= beat_times_s[beat_index] * 1000 - beat_tolerance_ms: # 允許稍微提前觸發
+                    
+                    highlight_index = next_highlight_index
+                    next_highlight_index = (highlight_index + 1) % 4 # 還是按順序切換高亮位置
+
+                    # 更新到下一個節拍時間
+                    beat_index += 1
+                    if beat_index < len(beat_times_s):
+                        next_highlight_music_ms = beat_times_s[beat_index] * 1000
+                    else:
+                        # 所有節拍已播放完畢，可以選擇停止遊戲或循環
+                        # 如果音樂結束，這裡可以觸發 finish_triggered = True
+                        pass 
+
+                # 判斷是否需要切換動作組合 (如果 config 中有設定 motion_switch_interval)
+                # 這裡仍然使用固定間隔，因為 motion_combinations 通常是固定的模式
+                if current_music_ms - last_motion_switch_music_ms >= motion_switch_interval * 1000:
+                    current_motion_index = (current_motion_index + 1) % len(motion_combinations)
+                    last_motion_switch_music_ms = current_music_ms # **更新為當前音樂時間**
+                    # 可以選擇在這裡重置 highlight_index 和相關時間戳，讓新組合從第一個動作開始
+                    # highlight_index = 0
+                    # next_highlight_index = 1
+                    # last_highlight_switch_music_ms = current_music_ms
 
 
-            # --- 動作判定與音效播放邏輯 ---
-            # 只有在全身準備好並且動作在允許的「判定窗口」內才觸發音效
-            # 這裡的 "時間窗口" 判斷可以更精確地與音樂時間綁定，
-            # 例如：檢查 current_music_ms 是否在 (last_highlight_switch_music_ms, last_highlight_switch_music_ms + action_window * 1000) 內
-            # 為了簡化和保持原邏輯，我們只在每次窗口切換後允許觸發一次音效
-            
-            # current_time - last_sound_time > config["sound_interval"] 這是防止同一個音效在短時間內被重複觸發
-            # sound_triggered_in_current_window 這是確保在當前高亮提示窗口內，音效只被觸發一次
-            can_play_sound_now = not sound_triggered_in_current_window # 每次切換窗口時會重置為 False
+                # --- 動作判定與音效播放邏輯 (重要修改區塊) ---
+                # 只有在全身準備好並且音效冷卻時間已過才允許播放音效
+                if full_body_ready_now and (time.time() - last_sound_time > sound_cooldown):
+                    
+                    # 取得當前動作組合中所有可能的動作名稱
+                    current_possible_actions = motion_combinations[current_motion_index]
 
-            if can_play_sound_now and full_body_ready_now: # 必須全身可見才能觸發
-                current_action_name = motion_combinations[current_motion_index][highlight_index]
-                resource = action_resources.get(current_action_name)
-
-                action_detected = False
-                # 這裡的 prev_xxx 變數用於偵測動作的「開始瞬間」，避免持續偵測到而重複觸發
-                if current_action_name == "open" and open_detected and not prev_open:
-                    if resource and resource["sound"]: resource["sound"].play()
-                    action_detected = True
-                elif current_action_name.startswith("head") and head_detected and not prev_head:
-                    if resource and resource["sound"]: resource["sound"].play()
-                    action_detected = True
-                elif current_action_name == "left" and left_detected and not prev_left:
-                    if resource and resource["sound"]: resource["sound"].play()
-                    action_detected = True
-                elif current_action_name == "right" and right_detected and not prev_right:
-                    if resource and resource["sound"]: resource["sound"].play()
-                    action_detected = True
+                    # 檢查每個偵測到的動作是否是當前組合中的一個，並且是新偵測到的
+                    played_sound = False
+                    # 檢查 "open" 動作
+                    if "open" in current_possible_actions and open_detected and not prev_open:
+                        resource = action_resources.get("open")
+                        # print('resource===', resource)
+                        if resource and resource["sound"]: 
+                            resource["sound"].play()
+                            score_total += 10
+                            combo_count += 1
+                            played_sound = True
+                    
+                    # 如果已經播放了音效，則不再檢查其他動作，並更新冷卻時間
+                    if played_sound:
+                        last_sound_time = time.time()
+                    else: # 只有在沒有播放音效的情況下才檢查下一個動作
+                        # 檢查 "head" 動作 (處理 config 中可能的 head, head_1, head_2)
+                        head_action_names = ["head", "head_1", "head_2"]
+                        detected_head_action = None
+                        for action_name in head_action_names:
+                            if action_name in current_possible_actions:
+                                detected_head_action = action_name
+                                break
                         
-                if action_detected:
-                    score_total += 10
-                    combo_count += 1
-                    sound_triggered_in_current_window = True # 標記為已觸發
+                        if detected_head_action and head_detected and not prev_head:
+                            resource = action_resources.get(detected_head_action) # 使用實際配置的 head 資源
+                            if resource and resource["sound"]: 
+                                resource["sound"].play()
+                                score_total += 10
+                                combo_count += 1
+                                played_sound = True
+                        
+                        if played_sound:
+                            last_sound_time = time.time()
+                        else:
+                            # 檢查 "left" 動作
+                            if "left" in current_possible_actions and left_detected and not prev_left:
+                                resource = action_resources.get("left")
+                                if resource and resource["sound"]: 
+                                    resource["sound"].play()
+                                    score_total += 10
+                                    combo_count += 1
+                                    played_sound = True
+                            
+                            if played_sound:
+                                last_sound_time = time.time()
+                            else:
+                                # 檢查 "right" 動作
+                                if "right" in current_possible_actions and right_detected and not prev_right:
+                                    resource = action_resources.get("right")
+                                    if resource and resource["sound"]: 
+                                        resource["sound"].play()
+                                        score_total += 10
+                                        combo_count += 1
+                                        played_sound = True
+                                        
+                                # 如果播放了音效，更新冷卻時間
+                                if played_sound:
+                                    last_sound_time = time.time()
 
-            # 更新 prev 狀態，用於下一個循環的「動作開始瞬間」判斷
-            prev_open = open_detected
-            prev_head = head_detected
-            prev_left = left_detected
-            prev_right = right_detected
+
+                # 更新 prev 狀態，用於下一個循環的「動作開始瞬間」判斷
+                prev_open = open_detected
+                prev_head = head_detected
+                prev_left = left_detected
+                prev_right = right_detected
+                
+            # --- 燈光效果控制 ---
+            # 燈光效果仍然與高亮索引綁定，因為這是視覺提示
+            lamp1_alpha, lamp2_alpha, lamp3_alpha, lamp4_alpha = 0.1, 0.1, 0.1, 0.1
+            current_motion_to_highlight = motion_combinations[current_motion_index][highlight_index]
+
+            # 這裡的邏輯需要根據你的 level_3 配置來調整
+            if level_name == "level_3":
+                # Level 3 使用 action_resources 中的特定圖片和文字
+                # 並且可能每個位置對應的動作是固定的，或者直接從 config 中定義
+                if current_motion_to_highlight == "open": lamp1_alpha = 1.0 # 只要是高亮，就亮燈
+                elif current_motion_to_highlight in ("head", "head_1"): lamp2_alpha = 1.0
+                elif current_motion_to_highlight == "head_2": lamp3_alpha = 1.0 # 假設 head_2 在第三個位置
+                elif (current_motion_to_highlight == "left" or current_motion_to_highlight == "right"): lamp4_alpha = 1.0 # 假設左右動作在第四個位置
+            else: # level_1, level_2 (使用通用圖片)
+                # 根據高亮索引來判斷
+                if highlight_index == 0: lamp1_alpha = 1.0
+                elif highlight_index == 1: lamp2_alpha = 1.0
+                elif highlight_index == 2: lamp3_alpha = 1.0
+                elif highlight_index == 3: lamp4_alpha = 1.0
+
+            # --- 繪圖邏輯 ---
+            # 繪製攝影機畫面（帶圓角）
+            mask = create_rounded_mask(cam_w, cam_h, radius=20)
+            cropped_bgra = cv2.cvtColor(cropped_frame, cv2.COLOR_BGR2BGRA)
+            cropped_bgra[:, :, 3] = mask # 將圓角遮罩應用於 alpha 通道
+            roi = canvas[cam_y:cam_y + cam_h, cam_x:cam_x + cam_w]
+            alpha_s = cropped_bgra[:, :, 3] / 255.0
+            alpha_l = 1.0 - alpha_s
+            for c in range(3):
+                roi[:, :, c] = (alpha_s * cropped_bgra[:, :, c] + alpha_l * roi[:, :, c])
             
-        # --- 燈光效果控制 ---
-        # 根據偵測到的動作更新燈光透明度
-        lamp1_alpha, lamp2_alpha, lamp3_alpha, lamp4_alpha = 0.1, 0.1, 0.1, 0.1
-        current_motion_to_highlight = motion_combinations[current_motion_index][highlight_index]
+            # 繪製高亮框
+            choose_x, choose_y = choose_positions[highlight_index]
+            canvas = overlay_image(canvas, choose_bg, choose_x, choose_y, choose_width, choose_height)
+            
+            # 繪製當前動作組合的圖片和文字
+            current_combination = motion_combinations[current_motion_index]
+            if level_name == "level_3":
+                # Level 3 根據配置中的圖片和文字位置繪製
+                for motion in current_combination:
+                    res = action_resources.get(motion)
+                    if res:
+                        img_pos = get_image_position(motion)
+                        word_pos = get_word_position(motion)
+                        if res["image"] is not None and img_pos: canvas = overlay_image(canvas, res["image"], *img_pos)
+                        if res["word_image"] is not None and word_pos: canvas = overlay_image(canvas, res["word_image"], *word_pos)
+            else:
+                # level_1, level_2 使用通用的圖片和文字，根據索引和預設位置繪製
+                for idx, motion in enumerate(current_combination):
+                    if motion == "right": 
+                        if idx == 2: # 假設在索引 2 的位置是 right
+                            canvas = overlay_image(canvas, img_right, img_right_x, img_right_y, img_right_w, img_right_h)
+                            canvas = overlay_image(canvas, word_right, img_word2_x, img_word2_y, img_word2_w, img_word2_h)
+                    elif motion == "left": 
+                        if idx == 3: # 假設在索引 3 的位置是 left
+                            canvas = overlay_image(canvas, img_left, img_left_x, img_left_y, img_left_w, img_left_h)
+                            canvas = overlay_image(canvas, word_left, img_word3_x, img_word3_y, img_word3_w, img_word3_h)
+                    elif motion == "head":
+                        if idx == 1: # 假設在索引 1 的位置是 head
+                            canvas = overlay_image(canvas, img_head, img_head_x, img_head_y, img_head_w, img_head_h)
+                            canvas = overlay_image(canvas, word_head, img_word4_x, img_word4_y, img_word4_w, img_word4_h)
+                        elif idx == 3: # 如果有第二個 head (level_2), 假設在索引 3
+                            canvas = overlay_image(canvas, img_head, img_head2_x, img_head2_y, img_head2_w, img_head2_h)
+                            canvas = overlay_image(canvas, word_head, img_word4_2_x, img_word4_2_y, img_word4_2_w, img_word4_2_h)
+                    elif motion == "open":
+                        if idx == 0: # 假設在索引 0 的位置是 open
+                            canvas = overlay_image(canvas, img_open, img_open_x, img_open_y, img_open_w, img_open_h)
+                            canvas = overlay_image(canvas, word_open, img_word5_x, img_word5_y, img_word5_w, img_word5_h)
+                        elif idx == 2: # 如果有第二個 open (level_2), 假設在索引 2
+                            canvas = overlay_image(canvas, img_open, img_open2_x, img_open2_y, img_open2_w, img_open2_h)
+                            canvas = overlay_image(canvas, word_open, img_word5_2_x, img_word5_2_y, img_word5_2_w, img_word5_2_h)
+            
+            # 繪製燈光效果 (根據 lamp_alpha)
+            canvas = overlay_image_with_alpha(canvas, btn1_img, btn1_x, btn1_y, btn1_w, btn1_h, lamp1_alpha)
+            canvas = overlay_image_with_alpha(canvas, btn2_img, btn2_x, btn2_y, btn2_w, btn2_h, lamp2_alpha)
+            canvas = overlay_image_with_alpha(canvas, btn3_img, btn3_x, btn3_y, btn3_w, btn3_h, lamp3_alpha)
+            canvas = overlay_image_with_alpha(canvas, btn4_img, btn4_x, btn4_y, btn4_w, btn4_h, lamp4_alpha)
+            
+            # 繪製關卡切換按鈕 (上/下關)
+            prev_button_img = end_btn_disabled if current_level_index <= 0 else end_btn_original
+            next_button_img = next_btn_disabled if current_level_index >= len(LEVEL_ORDER) - 1 else next_btn_original
+            canvas = overlay_image(canvas, prev_button_img, end_btn_x, end_btn_y, end_btn_w, end_btn_h)
+            canvas = overlay_image(canvas, next_button_img, next_btn_x, next_btn_y, next_btn_w, next_btn_h)
+            
+            # 將 OpenCV 圖片轉換為 PIL 圖片以便繪製文字
+            pil_img = Image.fromarray(canvas)
+            draw = ImageDraw.Draw(pil_img)
+            try:
+                font = ImageFont.truetype(font_path, 24)
+                score_font = ImageFont.truetype(font_path, 48)
+                combo_font = ImageFont.truetype(font_path, 36)
+                timer_font = ImageFont.truetype(font_path, 28)
+            except IOError: # 如果字體文件不存在，則載入預設字體
+                font = score_font = combo_font = timer_font = ImageFont.load_default()
+            
+            # 如果全身未準備好，顯示提示文字
+            if not full_body_ready_now and not countdown_completed:
+                lines = ["請保持全身在拍攝畫面以內", "並將雙腿盡量併攏"]
+                line_heights = [draw.textbbox((0,0), l, font=font)[3] for l in lines]
+                total_text_height = sum(line_heights) + 10 * (len(lines) - 1)
+                start_y = cam_y + (cam_h - total_text_height) // 2
+                current_y = start_y
+                for i, line in enumerate(lines):
+                    line_width = draw.textbbox((0,0), line, font=font)[2]
+                    draw.text((cam_x + (cam_w - line_width) // 2, current_y), line, font=font, fill=(0, 120, 255))
+                    current_y += line_heights[i] + 10
+            
+            # 繪製分數、連擊和剩餘時間
+            draw.text((790, 210), f"{score_total:03}", font=score_font, fill=(1, 125, 244))
+            draw.text((1332, 218), f"{combo_count:02}", font=combo_font, fill=(1, 125, 244))
+            
+            # 顯示剩餘時間 (基於音樂開始的系統時間)
+            if music_start_time:
+                remaining_time = max(0, countdown_time - int(time.time() - music_start_time))
+                draw.text((1030, 225), f"00:{remaining_time:02}", font=timer_font, fill=(80, 113, 135))
+            
+            canvas = np.array(pil_img)
 
-        # 這裡的邏輯需要根據你的 level_3 配置來調整
-        if level_name == "level_3":
-            # Level 3 使用 action_resources 中的特定圖片和文字
-            # 並且可能每個位置對應的動作是固定的，或者直接從 config 中定義
-            if current_motion_to_highlight == "open" and open_detected: lamp1_alpha = 1.0
-            elif current_motion_to_highlight in ("head", "head_1") and head_detected: lamp2_alpha = 1.0
-            elif current_motion_to_highlight == "head_2" and head_detected: lamp3_alpha = 1.0 # 假設 head_2 在第三個位置
-            elif (current_motion_to_highlight == "left" and left_detected) or \
-                 (current_motion_to_highlight == "right" and right_detected): lamp4_alpha = 1.0 # 假設左右動作在第四個位置
-        else: # level_1, level_2 (使用通用圖片)
-            # 根據高亮索引和實際偵測到的動作來判斷
-            if highlight_index == 0 and open_detected: lamp1_alpha = 1.0
-            elif highlight_index == 1 and head_detected: lamp2_alpha = 1.0
-            elif highlight_index == 2 and ((current_motion_to_highlight == "right" and right_detected) or \
-                                           (current_motion_to_highlight == "open" and open_detected)): lamp3_alpha = 1.0 # 這裡可能需要更精確的判斷
-            elif highlight_index == 3 and ((current_motion_to_highlight == "left" and left_detected) or \
-                                           (current_motion_to_highlight == "head" and head_detected)): lamp4_alpha = 1.0 # 這裡可能需要更精確的判斷
+            # 顯示遊戲結束彈窗
+            if show_finish_popup:
+                canvas = overlay_image(canvas, finish_popup, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT)
+                canvas = overlay_image(canvas, next2_btn, next2_btn_x, next2_btn_y, next2_btn_w, next2_btn_h)
 
+            # 將最終畫面轉換為 Pygame Surface 並顯示
+            pygame_surface = pygame.image.frombuffer(cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB).tobytes(), (SCREEN_WIDTH, SCREEN_HEIGHT), "RGB")
+            screen.blit(pygame_surface, (0, 0))
+            pygame.display.flip()
 
-        # --- 繪圖邏輯 ---
-        # 繪製攝影機畫面（帶圓角）
-        mask = create_rounded_mask(cam_w, cam_h, radius=20)
-        cropped_bgra = cv2.cvtColor(cropped_frame, cv2.COLOR_BGR2BGRA)
-        cropped_bgra[:, :, 3] = mask # 將圓角遮罩應用於 alpha 通道
-        roi = canvas[cam_y:cam_y + cam_h, cam_x:cam_x + cam_w]
-        alpha_s = cropped_bgra[:, :, 3] / 255.0
-        alpha_l = 1.0 - alpha_s
-        for c in range(3):
-            roi[:, :, c] = (alpha_s * cropped_bgra[:, :, c] + alpha_l * roi[:, :, c])
-        
-        # 繪製高亮框
-        choose_x, choose_y = choose_positions[highlight_index]
-        canvas = overlay_image(canvas, choose_bg, choose_x, choose_y, choose_width, choose_height)
-        
-        # 繪製當前動作組合的圖片和文字
-        current_combination = motion_combinations[current_motion_index]
-        if level_name == "level_3":
-            # Level 3 根據配置中的圖片和文字位置繪製
-            for motion in current_combination:
-                res = action_resources.get(motion)
-                if res:
-                    img_pos = get_image_position(motion)
-                    word_pos = get_word_position(motion)
-                    if res["image"] is not None and img_pos: canvas = overlay_image(canvas, res["image"], *img_pos)
-                    if res["word_image"] is not None and word_pos: canvas = overlay_image(canvas, res["word_image"], *word_pos)
-        else:
-            # level_1, level_2 使用通用的圖片和文字，根據索引和預設位置繪製
-            for idx, motion in enumerate(current_combination):
-                if motion == "right": 
-                    if idx == 2: # 假設在索引 2 的位置是 right
-                        canvas = overlay_image(canvas, img_right, img_right_x, img_right_y, img_right_w, img_right_h)
-                        canvas = overlay_image(canvas, word_right, img_word2_x, img_word2_y, img_word2_w, img_word2_h)
-                elif motion == "left": 
-                    if idx == 3: # 假設在索引 3 的位置是 left
-                        canvas = overlay_image(canvas, img_left, img_left_x, img_left_y, img_left_w, img_left_h)
-                        canvas = overlay_image(canvas, word_left, img_word3_x, img_word3_y, img_word3_w, img_word3_h)
-                elif motion == "head":
-                    if idx == 1: # 假設在索引 1 的位置是 head
-                        canvas = overlay_image(canvas, img_head, img_head_x, img_head_y, img_head_w, img_head_h)
-                        canvas = overlay_image(canvas, word_head, img_word4_x, img_word4_y, img_word4_w, img_word4_h)
-                    elif idx == 3: # 如果有第二個 head (level_2), 假設在索引 3
-                        canvas = overlay_image(canvas, img_head, img_head2_x, img_head2_y, img_head2_w, img_head2_h)
-                        canvas = overlay_image(canvas, word_head, img_word4_2_x, img_word4_2_y, img_word4_2_w, img_word4_2_h)
-                elif motion == "open":
-                    if idx == 0: # 假設在索引 0 的位置是 open
-                        canvas = overlay_image(canvas, img_open, img_open_x, img_open_y, img_open_w, img_open_h)
-                        canvas = overlay_image(canvas, word_open, img_word5_x, img_word5_y, img_word5_w, img_word5_h)
-                    elif idx == 2: # 如果有第二個 open (level_2), 假設在索引 2
-                        canvas = overlay_image(canvas, img_open, img_open2_x, img_open2_y, img_open2_w, img_open2_h)
-                        canvas = overlay_image(canvas, word_open, img_word5_2_x, img_word5_2_y, img_word5_2_w, img_word5_2_h)
-        
-        # 繪製燈光效果 (根據 lamp_alpha)
-        canvas = overlay_image_with_alpha(canvas, btn1_img, btn1_x, btn1_y, btn1_w, btn1_h, lamp1_alpha)
-        canvas = overlay_image_with_alpha(canvas, btn2_img, btn2_x, btn2_y, btn2_w, btn2_h, lamp2_alpha)
-        canvas = overlay_image_with_alpha(canvas, btn3_img, btn3_x, btn3_y, btn3_w, btn3_h, lamp3_alpha)
-        canvas = overlay_image_with_alpha(canvas, btn4_img, btn4_x, btn4_y, btn4_w, btn4_h, lamp4_alpha)
-        
-        # 繪製關卡切換按鈕 (上/下關)
-        prev_button_img = end_btn_disabled if current_level_index <= 0 else end_btn
-        next_button_img = next_btn_disabled if current_level_index >= len(LEVEL_ORDER) - 1 else next_btn
-        canvas = overlay_image(canvas, prev_button_img, end_btn_x, end_btn_y, end_btn_w, end_btn_h)
-        canvas = overlay_image(canvas, next_button_img, next_btn_x, next_btn_y, next_btn_w, next_btn_h)
-        
-        # 將 OpenCV 圖片轉換為 PIL 圖片以便繪製文字
-        pil_img = Image.fromarray(canvas)
-        draw = ImageDraw.Draw(pil_img)
-        try:
-            font = ImageFont.truetype(font_path, 24)
-            score_font = ImageFont.truetype(font_path, 48)
-            combo_font = ImageFont.truetype(font_path, 36)
-            timer_font = ImageFont.truetype(font_path, 28)
-        except IOError: # 如果字體文件不存在，則載入預設字體
-            font = score_font = combo_font = timer_font = ImageFont.load_default()
-        
-        # 如果全身未準備好，顯示提示文字
-        if not full_body_ready_now and not countdown_completed:
-            lines = ["請保持全身在拍攝畫面以內", "並將雙腿盡量併攏"]
-            line_heights = [draw.textbbox((0,0), l, font=font)[3] for l in lines]
-            total_text_height = sum(line_heights) + 10 * (len(lines) - 1)
-            start_y = cam_y + (cam_h - total_text_height) // 2
-            current_y = start_y
-            for i, line in enumerate(lines):
-                line_width = draw.textbbox((0,0), line, font=font)[2]
-                draw.text((cam_x + (cam_w - line_width) // 2, current_y), line, font=font, fill=(0, 120, 255))
-                current_y += line_heights[i] + 10
-        
-        # 繪製分數、連擊和剩餘時間
-        draw.text((790, 210), f"{score_total:03}", font=score_font, fill=(1, 125, 244))
-        draw.text((1332, 218), f"{combo_count:02}", font=combo_font, fill=(1, 125, 244))
-        
-        # 顯示剩餘時間 (基於音樂開始的系統時間)
-        if music_start_time:
-            remaining_time = max(0, countdown_time - int(time.time() - music_start_time))
-            draw.text((1030, 225), f"00:{remaining_time:02}", font=timer_font, fill=(80, 113, 135))
-        
-        canvas = np.array(pil_img)
+            clock.tick(30) # 控制幀率
 
-        # 顯示遊戲結束彈窗
-        if show_finish_popup:
-            canvas = overlay_image(canvas, finish_popup, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT)
-            canvas = overlay_image(canvas, next2_btn, next2_btn_x, next2_btn_y, next2_btn_w, next2_btn_h)
-
-        # 將最終畫面轉換為 Pygame Surface 並顯示
-        pygame_surface = pygame.image.frombuffer(cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB).tobytes(), (SCREEN_WIDTH, SCREEN_HEIGHT), "RGB")
-        screen.blit(pygame_surface, (0, 0))
-        pygame.display.flip()
-
-        clock.tick(30) # 控制幀率
-
-        # --- 事件處理 ---
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_q):
-                pygame.mixer.music.stop()
-                return "quit"
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                mx, my = pygame.mouse.get_pos()
-                if show_finish_popup: # 處理結束彈窗的按鈕點擊
-                    if next2_btn_x <= mx <= next2_btn_x + next2_btn_w and next2_btn_y <= my <= next2_btn_y + next2_btn_h:
-                        pygame.mixer.music.stop()
-                        return "next_level" if current_level_index < len(LEVEL_ORDER) - 1 else "quit" # 完成最後一關則回到首頁
-                else: # 處理遊戲中的上/下關按鈕
-                    if end_btn_x <= mx <= end_btn_x + end_btn_w and end_btn_y <= my <= end_btn_y + end_btn_h and current_level_index > 0:
-                        pygame.mixer.music.stop()
-                        return "prev_level"
-                    if next_btn_x <= mx <= next_btn_x + next_btn_w and next_btn_y <= my <= next_btn_y + next_btn_h and current_level_index < len(LEVEL_ORDER) - 1:
-                        pygame.mixer.music.stop()
-                        return "next_level"
+            # --- 事件處理 ---
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_q):
+                    running = False
+                    return "quit"
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mx, my = pygame.mouse.get_pos()
+                    if show_finish_popup: # 處理結束彈窗的按鈕點擊
+                        if next2_btn_x <= mx <= next2_btn_x + next2_btn_w and next2_btn_y <= my <= next2_btn_y + next2_btn_h:
+                            pygame.mixer.music.stop()
+                            running = False
+                            return "next_level" if current_level_index < len(LEVEL_ORDER) - 1 else "quit" # 完成最後一關則回到首頁
+                    else: # 處理遊戲中的上/下關按鈕
+                        # 使用原始的按鈕圖片來判斷點擊區域，而不是去飽和的圖片
+                        if end_btn_x <= mx <= end_btn_x + end_btn_w and end_btn_y <= my <= end_btn_y + end_btn_h and current_level_index > 0:
+                            pygame.mixer.music.stop()
+                            running = False
+                            return "prev_level"
+                        if next_btn_x <= mx <= next_btn_x + next_btn_w and next_btn_y <= my <= next_btn_y + next_btn_h and current_level_index < len(LEVEL_ORDER) - 1:
+                            pygame.mixer.music.stop()
+                            running = False
+                            return "next_level"
+    finally:
+        if 'pose' in locals() and pose: # 確保 pose 物件存在才呼叫 close
+            pose.close() # 確保釋放 MediaPipe 資源
+        pygame.mixer.music.stop() # 確保離開時停止音樂
 
 # --- 主程式進入點 ---
+# 將 selected_sound_pack 和 current_level_index 定義為全域變數
+# 這樣在 run_level 中就可以直接訪問和修改
+selected_sound_pack = "percussion" # 預設音效包
+current_level_index = 0 # 遊戲開始時的預設關卡索引
+
 def main():
     """程式主進入點，管理 Pygame 視窗和遊戲流程"""
     pygame.init()
@@ -790,16 +908,20 @@ def main():
     pygame.mixer.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     
-    cap = cv2.VideoCapture(1, cv2.CAP_DSHOW) # 開啟攝影機
+    cap = cv2.VideoCapture(0) # 開啟攝影機
+    # 設定攝影機解析度，通常較低解析度可以提升處理速度
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640) 
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480) 
+
     if not cap.isOpened():
         print("❌ 無法開啟攝影機，請檢查攝影機是否連接或被其他應用程式占用。")
-        return
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640) # 或更低，例如 480
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480) # 或更低，例如 360
+        sys.exit() # 如果攝影機無法開啟，直接退出程式
 
     # 遊戲狀態機
+    global selected_sound_pack
+    global current_level_index # 確保在 main 函式中也能操作這個全域變數
+
     game_state = "homepage"
-    selected_sound_pack = "percussion" # 預設音效包
     
     while True:
         if game_state == "homepage":
@@ -833,21 +955,22 @@ def main():
             action = run_correction_screen(screen, cap)
             if action == "start_game":
                 game_state = "levels"
+                current_level_index = 0 # 從校正畫面進入關卡時，重設為第一關
             else: # quit
                 break
         
         elif game_state == "levels":
-            current_level_index = 0 # 進入關卡選擇後從第一關開始
+            # current_level_index 在外部 main 函式中維護
             while 0 <= current_level_index < len(LEVEL_ORDER):
                 show_loading_screen(screen) # 載入關卡前顯示載入畫面
                 
-                level_name = LEVEL_ORDER[current_level_index]
-                # 將選擇的音效包傳入關卡
-                level_action = run_level(screen, cap, level_name, selected_sound_pack)
+                # run_level 不再接收 level_name 和 selected_sound_pack 作為參數
+                # 它們將透過全域變數訪問
+                level_action = run_level(screen, cap)
                 
                 if level_action == "quit":
                     game_state = "homepage" # 結束關卡後回到首頁
-                    break 
+                    break # 跳出 while 迴圈
                 elif level_action == "next_level":
                     if current_level_index < len(LEVEL_ORDER) - 1:
                         current_level_index += 1
@@ -856,8 +979,11 @@ def main():
                         break # 跳出 while 迴圈
                 elif level_action == "prev_level":
                     current_level_index -= 1
-            if game_state != "levels": # 如果是跳出 while 迴圈，則繼續外層的 state machine
-                continue
+            
+            if game_state == "levels": # 如果 while 迴圈自然結束（所有關卡完成或跳出），但遊戲狀態還是 levels
+                game_state = "homepage" # 預設回到首頁
+            
+            # continue # 這裡不需要 continue，因為外層的 if/elif 結構會確保正確的狀態轉換
 
     print("遊戲結束，感謝遊玩！")
     cap.release() # 釋放攝影機資源
